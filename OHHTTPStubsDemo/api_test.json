@@ -1,0 +1,9 @@
+{
+    "status":"SUCCESS",
+    "data":{
+        "buildingHistoryList":[
+                               "buildingId":"1234567890",
+                               "name":"中国",
+                               ]
+    }
+}
