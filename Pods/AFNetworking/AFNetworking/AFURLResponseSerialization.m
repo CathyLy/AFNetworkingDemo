@@ -46,10 +46,13 @@ static NSError * AFErrorWithUnderlyingError(NSError *error, NSError *underlyingE
 
     NSMutableDictionary *mutableUserInfo = [error.userInfo mutableCopy];
     mutableUserInfo[NSUnderlyingErrorKey] = underlyingError;
-
+    //主要是把json解析的错误,赋值给我们需要返回给用户的error上
     return [[NSError alloc] initWithDomain:error.domain code:error.code userInfo:mutableUserInfo];
 }
 
+/*
+ 判断是不是我们之前生成的错误信息,是的话返回YES
+ */
 static BOOL AFErrorOrUnderlyingErrorHasCodeInDomain(NSError *error, NSInteger code, NSString *domain) {
     if ([error.domain isEqualToString:domain] && error.code == code) {
         return YES;
@@ -59,15 +62,22 @@ static BOOL AFErrorOrUnderlyingErrorHasCodeInDomain(NSError *error, NSInteger co
 
     return NO;
 }
-
+/*
+ 方法主要是通过递归的方式实现?
+ */
 static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingOptions readingOptions) {
+    //数组
     if ([JSONObject isKindOfClass:[NSArray class]]) {
+        //生成一个指定count的个数的数组
         NSMutableArray *mutableArray = [NSMutableArray arrayWithCapacity:[(NSArray *)JSONObject count]];
+        
         for (id value in (NSArray *)JSONObject) {
             [mutableArray addObject:AFJSONObjectByRemovingKeysWithNullValues(value, readingOptions)];
         }
-
+        //根据解析类型是mutale和非mutable,返回响应的数据
         return (readingOptions & NSJSONReadingMutableContainers) ? mutableArray : [NSArray arrayWithArray:mutableArray];
+        
+        //字典
     } else if ([JSONObject isKindOfClass:[NSDictionary class]]) {
         NSMutableDictionary *mutableDictionary = [NSMutableDictionary dictionaryWithDictionary:JSONObject];
         for (id <NSCopying> key in [(NSDictionary *)JSONObject allKeys]) {
@@ -78,7 +88,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
                 mutableDictionary[key] = AFJSONObjectByRemovingKeysWithNullValues(value, readingOptions);
             }
         }
-
+        
         return (readingOptions & NSJSONReadingMutableContainers) ? mutableDictionary : [NSDictionary dictionaryWithDictionary:mutableDictionary];
     }
 
@@ -107,18 +117,23 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
 
 #pragma mark -
 
+/*
+ 判断是不是可接受类型和可接受的code,不是则填充error
+ 这个方法就是来判断返回数据与咱们使用的解析器是否匹配，需要解析的状态码是否匹配
+ */
 - (BOOL)validateResponse:(NSHTTPURLResponse *)response
                     data:(NSData *)data
                    error:(NSError * __autoreleasing *)error
 {
     BOOL responseIsValid = YES;
     NSError *validationError = nil;
-
+//主要判断自己接受的类型和response的数据类型是否一致
     if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
         if (self.acceptableContentTypes && ![self.acceptableContentTypes containsObject:[response MIMEType]] &&
             !([response MIMEType] == nil && [data length] == 0)) {
 
             if ([data length] > 0 && [response URL]) {
+                //错误信息字典
                 NSMutableDictionary *mutableUserInfo = [@{
                                                           NSLocalizedDescriptionKey: [NSString stringWithFormat:NSLocalizedStringFromTable(@"Request failed: unacceptable content-type: %@", @"AFNetworking", nil), [response MIMEType]],
                                                           NSURLErrorFailingURLErrorKey:[response URL],
@@ -150,7 +165,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
             responseIsValid = NO;
         }
     }
-
+    //给我们传过来的错误指针赋值
     if (error && !responseIsValid) {
         *error = validationError;
     }
@@ -164,6 +179,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
                            data:(NSData *)data
                           error:(NSError *__autoreleasing *)error
 {
+    //判断接受的类型与response接收的类型是否一致
     [self validateResponse:(NSHTTPURLResponse *)response data:data error:error];
 
     return data;
@@ -248,11 +264,12 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
     // See https://github.com/rails/rails/issues/1742
     BOOL isSpace = [data isEqualToData:[NSData dataWithBytes:" " length:1]];
     if (data.length > 0 && !isSpace) {
+        //解析json
         responseObject = [NSJSONSerialization JSONObjectWithData:data options:self.readingOptions error:&serializationError];
     } else {
         return nil;
     }
-
+    //判断是否需要移除 null
     if (self.removesKeysWithNullValues && responseObject) {
         responseObject = AFJSONObjectByRemovingKeysWithNullValues(responseObject, self.readingOptions);
     }
@@ -261,6 +278,7 @@ static id AFJSONObjectByRemovingKeysWithNullValues(id JSONObject, NSJSONReadingO
         *error = AFErrorWithUnderlyingError(serializationError, *error);
     }
 
+    //返回解析结果
     return responseObject;
 }
 

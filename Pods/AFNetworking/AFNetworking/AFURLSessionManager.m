@@ -264,22 +264,26 @@ didCompleteWithError:(NSError *)error
 {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu"
+    //self.manager 是weak修饰的,所以使用__strong防止提前释放
     __strong AFURLSessionManager *manager = self.manager;
 
     __block id responseObject = nil;
-
+    //存储相关信息,用来用于发送通知使用的
     __block NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    //响应解析对象
     userInfo[AFNetworkingTaskDidCompleteResponseSerializerKey] = manager.responseSerializer;
 
     //Performance Improvement from #2672
     NSData *data = nil;
     if (self.mutableData) {
+        //把请求的数据传出去,然后释放内存
         data = [self.mutableData copy];
         //We no longer need the reference, so nil it out to gain back some memory.
         self.mutableData = nil;
     }
 
     if (self.downloadFileURL) {
+        //继续给userInfo添加数据
         userInfo[AFNetworkingTaskDidCompleteAssetPathKey] = self.downloadFileURL;
     } else if (data) {
         userInfo[AFNetworkingTaskDidCompleteResponseDataKey] = data;
@@ -288,11 +292,13 @@ didCompleteWithError:(NSError *)error
     if (error) {
         userInfo[AFNetworkingTaskDidCompleteErrorKey] = error;
 
+        //自定义完成组和自定义完成queue,完成回调
         dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
             if (self.completionHandler) {
                 self.completionHandler(task.response, responseObject, error);
             }
 
+            //在主线程中通知
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:AFNetworkingTaskDidCompleteNotification object:task userInfo:userInfo];
             });
@@ -300,20 +306,23 @@ didCompleteWithError:(NSError *)error
     } else {
         dispatch_async(url_session_manager_processing_queue(), ^{
             NSError *serializationError = nil;
+            //解析数据
             responseObject = [manager.responseSerializer responseObjectForResponse:task.response data:data error:&serializationError];
 
+            //如果是下载文件,responseObject则是下载的路径
             if (self.downloadFileURL) {
                 responseObject = self.downloadFileURL;
             }
 
             if (responseObject) {
+                //写入userInfo中
                 userInfo[AFNetworkingTaskDidCompleteSerializedResponseKey] = responseObject;
             }
 
             if (serializationError) {
                 userInfo[AFNetworkingTaskDidCompleteErrorKey] = serializationError;
             }
-
+            //回调结果
             dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
                 if (self.completionHandler) {
                     self.completionHandler(task.response, responseObject, serializationError);
@@ -334,6 +343,7 @@ didCompleteWithError:(NSError *)error
           dataTask:(__unused NSURLSessionDataTask *)dataTask
     didReceiveData:(NSData *)data
 {
+    //被URLSession的代理转至这里,拼接需要回调的数据
     [self.mutableData appendData:data];
 }
 
@@ -345,12 +355,14 @@ didFinishDownloadingToURL:(NSURL *)location
 {
     NSError *fileManagerError = nil;
     self.downloadFileURL = nil;
-
+    //AF代理自定义的block
     if (self.downloadTaskDidFinishDownloading) {
+        //得到一个自定义的下载路径
         self.downloadFileURL = self.downloadTaskDidFinishDownloading(session, downloadTask, location);
         if (self.downloadFileURL) {
+            //把下载路径移至我们自定义的下载路径
             [[NSFileManager defaultManager] moveItemAtURL:location toURL:self.downloadFileURL error:&fileManagerError];
-
+            //错误发送通知
             if (fileManagerError) {
                 [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDownloadTaskDidFailToMoveFileNotification object:downloadTask userInfo:fileManagerError.userInfo];
             }
@@ -372,6 +384,7 @@ didFinishDownloadingToURL:(NSURL *)location
  */
 
 static inline void af_swizzleSelector(Class theClass, SEL originalSelector, SEL swizzledSelector) {
+    //这个方法获取当前类继承链逐级往上,第一个实现的该方法,获取到的方法不能确定是当前类还是父类,这个地方也没有办法保证方法只交换一次,
     Method originalMethod = class_getInstanceMethod(theClass, originalSelector);
     Method swizzledMethod = class_getInstanceMethod(theClass, swizzledSelector);
     method_exchangeImplementations(originalMethod, swizzledMethod);
@@ -384,9 +397,14 @@ static inline BOOL af_addMethod(Class theClass, SEL selector, Method method) {
 static NSString * const AFNSURLSessionTaskDidResumeNotification  = @"com.alamofire.networking.nsurlsessiontask.resume";
 static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofire.networking.nsurlsessiontask.suspend";
 
+
+/*
+ 这个类的作用就是替换NSURLSession中的resume和suspend方法,在正常处理原有逻辑的同时,多发送一个通知
+ */
 @interface _AFURLSessionTaskSwizzling : NSObject
 
 @end
+
 
 @implementation _AFURLSessionTaskSwizzling
 
@@ -424,22 +442,32 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
             8) Set the current class to the super class, and repeat steps 3-8
          */
         NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        //创建一个session,通过session创建一个task
         NSURLSession * session = [NSURLSession sessionWithConfiguration:configuration];
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnonnull"
         NSURLSessionDataTask *localDataTask = [session dataTaskWithURL:nil];
 #pragma clang diagnostic pop
+        //获取as_resume实现的指针
         IMP originalAFResumeIMP = method_getImplementation(class_getInstanceMethod([self class], @selector(af_resume)));
         Class currentClass = [localDataTask class];
-        
+        //检查当前类是否实现了resume这个方法
+        //循环执行下面的操作的作用--->因为ios7中有两个类都实现了resume和suspend方法,而且子类没有调用父类的方法,在ios8中只需要对一个雷USURLSession进行交换
         while (class_getInstanceMethod(currentClass, @selector(resume))) {
+            //获取当前class的父类
             Class superClass = [currentClass superclass];
+            //获取当前类对于resume实现的指针
             IMP classResumeIMP = method_getImplementation(class_getInstanceMethod(currentClass, @selector(resume)));
+            //获取当前父类对于resume实现的指针
             IMP superclassResumeIMP = method_getImplementation(class_getInstanceMethod(superClass, @selector(resume)));
+            //如果当前class对于resume的实现和父类不一样（类似iOS7上的情况），并且当前class的resume实现和af_resume不一样，才进行method swizzling
             if (classResumeIMP != superclassResumeIMP &&
                 originalAFResumeIMP != classResumeIMP) {
+                
                 [self swizzleResumeAndSuspendMethodForClass:currentClass];
             }
+            
+            //
             currentClass = [currentClass superclass];
         }
         
@@ -448,6 +476,9 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     }
 }
 
+/*
+ 执行交换函数
+ */
 + (void)swizzleResumeAndSuspendMethodForClass:(Class)theClass {
     Method afResumeMethod = class_getInstanceMethod(self, @selector(af_resume));
     Method afSuspendMethod = class_getInstanceMethod(self, @selector(af_suspend));
@@ -466,6 +497,9 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     return NSURLSessionTaskStateCanceling;
 }
 
+/*
+ 被替换掉的方法,只要task开启或暂停,就会执行
+ */
 - (void)af_resume {
     NSAssert([self respondsToSelector:@selector(state)], @"Does not respond to state");
     NSURLSessionTaskState state = [self state];
@@ -532,7 +566,8 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     self.sessionConfiguration = configuration;
 
     self.operationQueue = [[NSOperationQueue alloc] init];
-    //并发线程数为1
+    //仅仅是回调代理的并发线程数为1,并不是请求网络的线程数
+    //请求网络是由NSURLSession来做的,它的内部维护了一个线程池,用来做网络请求,基于CFSocket去发送请求和接受数据
     self.operationQueue.maxConcurrentOperationCount = 1;
     //代理的继承，实际上NSURLSession去判断了，你实现了哪个方法会去调用，包括子代理的方法！
     self.session = [NSURLSession sessionWithConfiguration:self.sessionConfiguration delegate:self delegateQueue:self.operationQueue];
@@ -678,7 +713,9 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     delegate.manager = self;
     delegate.completionHandler = completionHandler;
 
+    //返回地址的block
     if (destination) {
+        //地址被赋值给AF的block
         delegate.downloadTaskDidFinishDownloading = ^NSURL * (NSURLSession * __unused session, NSURLSessionDownloadTask *task, NSURL *location) {
             return destination(location, task.response);
         };

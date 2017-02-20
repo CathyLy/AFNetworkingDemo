@@ -27,25 +27,18 @@
         return [OHHTTPStubsResponse responseWithFileAtPath:fisture statusCode:200 headers:@{@"Content-Type":@"application/json"}];
     }];
     
-    
+    /*
+     1.一般在主线程初始化manager,调用get,post方法请求数据
+     2.当调用resume之后,在NSURLSession中对网络进行对并发数据的请求
+     3.数据请求完成后,回调回来在我们一开始生成的并发数为1的NSOPerationQueue中,多线程串行回调
+     4.数据解析,我们又自己创建并发的多线程,去对数据进行解析???
+     */
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    NSURLSessionDataTask *task = [manager GET:@"https://idont.cc" parameters:nil progress:nil success:^(NSURLSessionDataTask * _Nonnull task, id  _Nullable responseObject) {
+   [manager GET:@"https://idont.cc" parameters:nil progress:nil success:^(NSURLSessionDataTask * _Nonnull task, id  _Nullable responseObject) {
         NSLog(@"%@",responseObject);
     } failure:^(NSURLSessionDataTask * _Nullable task, NSError * _Nonnull error) {
         NSLog(@"%@",error);
     }];
-    
-    NSMutableArray *mArr = [NSMutableArray array];
-    NSDictionary *dict = @{@"cathy":@"liu",@"aaa":@"111",@"zzz":@"999"};
-   NSSortDescriptor *sortDescriptor = [NSSortDescriptor sortDescriptorWithKey:@"a" ascending:YES selector:@selector(compare:)];
-    
-    [dict.allKeys sortedArrayUsingDescriptors:@[sortDescriptor]];
-//    for (id key in ) {
-//        id value = [dict valueForKey:key];
-////        mArr addObjectsFromArray:<#(nonnull NSArray *)#>
-//    }
-    
-    NSLog(@"%@",sortDescriptor);
     
 }
 
