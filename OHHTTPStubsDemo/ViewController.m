@@ -33,7 +33,16 @@
      3.数据请求完成后,回调回来在我们一开始生成的并发数为1的NSOPerationQueue中,多线程串行回调
      4.数据解析,我们又自己创建并发的多线程,去对数据进行解析???
      */
-    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
+//    [AFHTTPSessionManager initWithBaseURL:]
+//    [AFHTTPSessionManager initWithBaseURL: sessionConfiguration:];
+//    [AFHTTPSessionManager initWithSessionConfiguration:]
+//    [NSURLSession sessionWithConfiguration: delegate: delegateQueue:]
+    ///[AFJSONResponseSerializer serializer]
+    [AFSecurityPolicy defaultPolicy];//负责身份认证
+    [AFNetworkReachabilityManager sharedManager];//查看网络连接情况
+    [AFHTTPRequestSerializer serializer];//负责序列化请求
+    [AFJSONResponseSerializer serializer];//负责序列化响应
+   AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
    [manager GET:@"https://idont.cc" parameters:nil progress:nil success:^(NSURLSessionDataTask * _Nonnull task, id  _Nullable responseObject) {
         NSLog(@"%@",responseObject);
     } failure:^(NSURLSessionDataTask * _Nullable task, NSError * _Nonnull error) {
