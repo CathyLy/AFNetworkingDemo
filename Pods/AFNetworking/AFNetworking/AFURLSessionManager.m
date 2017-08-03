@@ -113,7 +113,7 @@ typedef void (^AFURLSessionTaskProgressBlock)(NSProgress *);
 typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id responseObject, NSError *error);
 
 
-#pragma mark -
+#pragma mark - AFURLSessionManagerTaskDelegate
 
 @interface AFURLSessionManagerTaskDelegate : NSObject <NSURLSessionTaskDelegate, NSURLSessionDataDelegate, NSURLSessionDownloadDelegate>
 @property (nonatomic, weak) AFURLSessionManager *manager;//作为属性,避免循环引用
@@ -293,6 +293,7 @@ didCompleteWithError:(NSError *)error
         userInfo[AFNetworkingTaskDidCompleteErrorKey] = error;
 
         //自定义完成组和自定义完成queue,完成回调
+        //如果当前manager持有comopletionGroup或者completionQueue就使用它们,否则会创建一个dispatch_group_t并在主线程调用completionHandler,并发送通知
         dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
             if (self.completionHandler) {
                 self.completionHandler(task.response, responseObject, error);
@@ -338,7 +339,7 @@ didCompleteWithError:(NSError *)error
 }
 
 #pragma mark - NSURLSessionDataTaskDelegate
-
+//会在收到数据时调用
 - (void)URLSession:(__unused NSURLSession *)session
           dataTask:(__unused NSURLSessionDataTask *)dataTask
     didReceiveData:(NSData *)data
@@ -348,7 +349,7 @@ didCompleteWithError:(NSError *)error
 }
 
 #pragma mark - NSURLSessionDownloadTaskDelegate
-
+//会在下载完成的时候调用
 - (void)URLSession:(NSURLSession *)session
       downloadTask:(NSURLSessionDownloadTask *)downloadTask
 didFinishDownloadingToURL:(NSURL *)location
@@ -372,7 +373,7 @@ didFinishDownloadingToURL:(NSURL *)location
 
 @end
 
-#pragma mark -
+#pragma mark - _AFURLSessionTaskSwizzling
 
 /**
  *  A workaround for issues related to key-value observing the `state` of an `NSURLSessionTask`.
@@ -521,7 +522,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
 }
 @end
 
-#pragma mark -
+#pragma mark - AFURLSessionManager
 
 @interface AFURLSessionManager ()
 @property (readwrite, nonatomic, strong) NSURLSessionConfiguration *sessionConfiguration;
@@ -667,6 +668,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     [delegate setupProgressForTask:task];
     //设置task的Suspend和Resume
     [self addNotificationObserverForTask:task];
+    //使用 NSLock 来保证不同线程使用 mutableTaskDelegatesKeyedByTaskIdentifier 时，不会出现线程竞争的问题
     [self.lock unlock];
 }
 
@@ -828,7 +830,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     url_session_manager_create_task_safely(^{
         dataTask = [self.session dataTaskWithRequest:request];
     });
-
+    //方法得到一个AFURLSessionManagerTaskDelegate对象,将uploadProgressBlock,downloadProgressBlock,completionHandler传入该对象并在相应事件发生时回调
     [self addDelegateForDataTask:dataTask uploadProgress:uploadProgressBlock downloadProgress:downloadProgressBlock completionHandler:completionHandler];
 
     return dataTask;

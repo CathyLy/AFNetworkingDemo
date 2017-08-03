@@ -255,7 +255,7 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
 
 #pragma mark -
 /*
- 证书链:由两个环节组成一信任锚(CA证书)环节和已签名证书环节,简单来说证书链就是根证书??
+ 证书链:由两个环节组成一信任锚(CA证书)环节和已签名证书环节,简单来说证书链就是根证书
  
  */
 //https认证:验证服务器是否值得信任
